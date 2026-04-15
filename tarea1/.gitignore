@@ -1,0 +1,4 @@
+.DS_Store
+u-boot-qemu/
+ubuntu-amd64.qcow2
+ubuntu-22.04.5-desktop-amd64.iso
