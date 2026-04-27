@@ -1,0 +1,120 @@
+import os
+import sys
+
+CORRIDA = range(0, 100)
+PARTICULA = ["e-", "mu-", "gamma"]
+VARIACION = ["VaryE"]
+
+# Configuración de contenedor y Python host, con valores por defecto
+CONTAINER = config.get("container", os.environ.get("WCSIM_CONTAINER", "WCSim"))
+HOST_PY = config.get("host_python", os.environ.get("WCSIM_HOST_PY", "/opt/homebrew/Caskroom/miniconda/base/bin/python3"))
+
+
+rule all:
+    input:
+        expand('../../data/1_MAC/{v}/{p}/wcs_MCA_{p}__{c}_500_MeV.mac',
+               c=CORRIDA, p=PARTICULA, v=VARIACION),
+        expand('../../data/2_ROOT/{v}/{p}/wcs_MCA_{p}__{c}_500_MeV.root',
+               c=CORRIDA, p=PARTICULA, v=VARIACION),
+        expand('../../data/3_Analisis_NPZ/{v}/{p}/wcs_MCA_{p}__{c}_500_MeV.npz',
+               c=CORRIDA, p=PARTICULA, v=VARIACION),
+        expand('../../data/4_Imagen_NPZ/{v}/{p}/IMAGES_wcs_MCA_{p}__{c}_500_MeV.npy',
+               c=CORRIDA, p=PARTICULA, v=VARIACION),
+        expand('../../data/5_ML_NPZ/{v}/{p}/wcs_MCA_{p}__{c}_500_MeV.npz',
+               c=CORRIDA, p=PARTICULA, v=VARIACION),
+        expand('../../data/6_HD5/{v}/{p}/wcs_MCA_{p}__{c}_500_MeV.h5',
+               c=CORRIDA, p=PARTICULA, v=VARIACION)
+
+
+rule MAC_to_ROOT:
+    input:
+        '../../data/1_MAC/{v}/{p}/wcs_MCA_{p}__{c}_500_MeV.mac'
+    output:
+        '../../data/2_ROOT/{v}/{p}/wcs_MCA_{p}__{c}_500_MeV.root'
+    params:
+        container=CONTAINER,
+        mac_in='/home/neutrino/data/1_MAC/{v}/{p}/wcs_MCA_{p}__{c}_500_MeV.mac',
+        root_dst='/home/neutrino/data/2_ROOT/{v}/{p}/wcs_MCA_{p}__{c}_500_MeV.root',
+        root_name='wcs_MCA_{p}__{c}_500_MeV.root'
+    group: "mygroup"
+    shell:
+        """
+        mkdir -p "$(dirname {output})"
+        docker exec {params.container} bash -lc 'cd /home/neutrino/software; source run.sh; \
+            cd "$SOFTWARE"/WCSim_build && \
+            ./WCSim {params.mac_in} && \
+            mv /home/neutrino/software/WCSim_build/{params.root_name} {params.root_dst}'
+        """
+
+
+rule ROOT_to_event_dump:
+    input:
+        '../../data/2_ROOT/{v}/{p}/wcs_MCA_{p}__{c}_500_MeV.root'
+    output:
+        '../../data/3_Analisis_NPZ/{v}/{p}/wcs_MCA_{p}__{c}_500_MeV.npz'
+    params:
+        container=CONTAINER,
+        root_in='/home/neutrino/data/2_ROOT/{v}/{p}/wcs_MCA_{p}__{c}_500_MeV.root',
+        npz_dir='/home/neutrino/data/3_Analisis_NPZ/{v}/{p}'
+    group: "mygroup"
+    shell:
+        """
+        mkdir -p "$(dirname {output})"
+        docker exec {params.container} bash -c "cd /home/neutrino/software; source run.sh; \
+            cd /home/WatChMal/DataTools && \
+            python3 event_dump.py {params.root_in} -d {params.npz_dir}"
+        """
+
+
+rule NPZ_to_image:
+    input:
+        '../../data/3_Analisis_NPZ/{v}/{p}/wcs_MCA_{p}__{c}_500_MeV.npz'
+    output:
+        '../../data/4_Imagen_NPZ/{v}/{p}/IMAGES_wcs_MCA_{p}__{c}_500_MeV.npy'
+    params:
+        host_py=HOST_PY,
+        img_name='IMAGES_wcs_MCA_{p}__{c}_500_MeV.npy'
+    group: "mygroup"
+    shell:
+        """
+        mkdir -p "$(dirname {output})"
+        {params.host_py} ../python/npz_to_image.py \
+            -m ../../data/Geometries/IWCD_geometry_mPMT.npy \
+            -f {input}
+        mv {params.img_name} {output}
+        """
+
+
+rule ROOT_to_event_dump_barrel:
+    input:
+        '../../data/2_ROOT/{v}/{p}/wcs_MCA_{p}__{c}_500_MeV.root'
+    output:
+        '../../data/5_ML_NPZ/{v}/{p}/wcs_MCA_{p}__{c}_500_MeV.npz'
+    params:
+        container=CONTAINER,
+        root_in='/home/neutrino/data/2_ROOT/{v}/{p}/wcs_MCA_{p}__{c}_500_MeV.root',
+        src_npz='../../data/2_ROOT/{v}/{p}/wcs_MCA_{p}__{c}_500_MeV.npz'
+    group: "mygroup"
+    shell:
+        """
+        mkdir -p "$(dirname {output})"
+        docker exec {params.container} bash -c "cd /home/neutrino/software; source run.sh; \
+            cd /home/WatChMal/DataTools && \
+            python3 event_dump_barrel.py {params.root_in}"
+        mv {params.src_npz} {output}
+        """
+
+
+rule NPZ_to_H5_digihit:
+    input:
+        '../../data/3_Analisis_NPZ/{v}/{p}/wcs_MCA_{p}__{c}_500_MeV.npz'
+    output:
+        '../../data/6_HD5/{v}/{p}/wcs_MCA_{p}__{c}_500_MeV.h5'
+    params:
+        host_py=HOST_PY
+    group: "mygroup"
+    shell:
+        """
+        mkdir -p "$(dirname {output})"
+        {params.host_py} ../python/np_to_digihit_array_hdf5_FJOL.py {input} -o {output}
+        """
